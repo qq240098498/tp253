@@ -42,18 +42,16 @@ function segmentStats(rows, settings) {
     const value = Number(row.temperatureC);
     const out = value > Number(settings.upperLimitC) || value < Number(settings.lowerLimitC);
     if (out) {
-      const previous = current;
-      if (previous) {
-        previous.endAt = row.at;
-        previous.minutes += previous.lastGapMinutes || 0;
-        previous.peakC = value > previous.peakC ? value : previous.peakC;
-        previous.points += 1;
+      if (current) {
+        // 段时长按相邻记录的真实时刻差累加（间隔不固定时同样成立），等价于首尾记录时刻差
+        current.minutes += store.minutesBetween(current.endAt, row.at);
+        current.endAt = row.at;
+        current.peakC = value > current.peakC ? value : current.peakC;
+        current.points += 1;
       } else {
         current = { startAt: row.at, endAt: row.at, minutes: 0, peakC: value, points: 1 };
         segments.push(current);
       }
-      // 与上一条记录的间隔按固定记录间隔计
-      current.lastGapMinutes = Number(settings.recordIntervalMinutes);
     } else {
       current = null;
     }
