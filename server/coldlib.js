@@ -44,16 +44,15 @@ function segmentStats(rows, settings) {
     if (out) {
       const previous = current;
       if (previous) {
+        // 段时长按段内相邻记录的实际时刻差累加，等于首尾记录的时刻差
+        previous.minutes += store.minutesBetween(previous.endAt, row.at);
         previous.endAt = row.at;
-        previous.minutes += previous.lastGapMinutes || 0;
         previous.peakC = value > previous.peakC ? value : previous.peakC;
         previous.points += 1;
       } else {
         current = { startAt: row.at, endAt: row.at, minutes: 0, peakC: value, points: 1 };
         segments.push(current);
       }
-      // 与上一条记录的间隔按固定记录间隔计
-      current.lastGapMinutes = Number(settings.recordIntervalMinutes);
     } else {
       current = null;
     }
@@ -73,7 +72,7 @@ function excursionStats(data, batchId) {
   });
 }
 
-// 断链：相邻记录的时刻差超过门槛
+// 断链：相邻记录的时刻差超过门槛，缺口时长按实际时刻差计
 function chainGaps(data, batchId) {
   const settings = data.settings;
   const rows = effectiveRecords(data, batchId);
@@ -81,7 +80,7 @@ function chainGaps(data, batchId) {
   for (let i = 1; i < rows.length; i += 1) {
     const minutes = store.minutesBetween(rows[i - 1].at, rows[i].at);
     if (minutes > Number(settings.chainGapMinutes)) {
-      gaps.push({ from: rows[i - 1].at, to: rows[i].at, minutes, countedMinutes: Number(settings.recordIntervalMinutes) });
+      gaps.push({ from: rows[i - 1].at, to: rows[i].at, minutes, countedMinutes: minutes });
     }
   }
   return { gaps, gapCount: gaps.length, totalGapMinutes: gaps.reduce((acc, g) => acc + g.countedMinutes, 0) };
@@ -122,20 +121,13 @@ function accumulatedExcursionMinutes(data, batchId) {
   return excursionStats(data, batchId).totalMinutes;
 }
 
-function monthlyExcursionMinutes(data, batchId) {
-  const rows = effectiveRecords(data, batchId);
-  const firstAt = rows.length ? rows[0].at : '';
-  const month = firstAt.slice(0, 7);
-  const scoped = rows.filter((r) => String(r.at).slice(0, 7) === month);
-  return segmentStats(scoped, data.settings).totalMinutes;
-}
-
 // 放行判定：最长超限、累计超限、断链、探头校准四条
 function releaseCheck(data, batch) {
   const settings = data.settings;
   const stats = excursionStats(data, batch.id);
   const chain = chainGaps(data, batch.id);
-  const accumulated = monthlyExcursionMinutes(data, batch.id);
+  // 累计超限按批次全周期计，与页面上显示的累计超限是同一个数
+  const accumulated = stats.totalMinutes;
   const expired = expiredProbes(data, batch.id, batch.loadedAt ? String(batch.loadedAt).slice(0, 10) : '');
   const conditions = [
     { key: 'longest', ok: stats.longestMinutes <= Number(settings.allowExcursionMinutes), value: stats.longestMinutes, limit: Number(settings.allowExcursionMinutes), text: '单次连续超限不超过 ' + settings.allowExcursionMinutes + ' 分钟' },
@@ -168,6 +160,5 @@ module.exports = {
   probeValidOn,
   expiredProbes,
   accumulatedExcursionMinutes,
-  monthlyExcursionMinutes,
   releaseCheck,
 };
